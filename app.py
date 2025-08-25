@@ -16,6 +16,10 @@ import logging
 import traceback
 from typing import Dict, List, Optional, Tuple, Any
 import time
+import urllib3
+
+# 抑制SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -80,7 +84,8 @@ def fetch_otc_stock_data():
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        response = requests.get(url, headers=headers, timeout=30)
+        # 修正SSL證書驗證問題
+        response = requests.get(url, headers=headers, timeout=30, verify=False)
         response.raise_for_status()
         
         data = response.json()

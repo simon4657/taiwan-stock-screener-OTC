@@ -538,90 +538,340 @@ def get_stocks():
         logger.error(f"獲取股票清單失敗: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+def format_volume(volume):
+    """格式化成交張數顯示（1張=1000股）"""
+    # 將成交量（股）轉換為成交張數（張）
+    volume_lots = volume / 1000
+    
+    if volume_lots >= 100000:  # 10萬張以上
+        return f"{volume_lots / 10000:.1f}萬張"
+    elif volume_lots >= 1000:  # 1千張以上
+        return f"{volume_lots / 1000:.1f}千張"
+    else:
+        return f"{volume_lots:,.0f}張"
+
+def calculate_trend_direction(current_value, previous_value, threshold=0.05):
+    """計算趨勢方向和變化百分比"""
+    if previous_value == 0:
+        return "→", 0
+    
+    change_percent = ((current_value - previous_value) / previous_value) * 100
+    
+    if change_percent > threshold * 100:
+        return "↑", change_percent
+    elif change_percent < -threshold * 100:
+        return "↓", change_percent
+    else:
+        return "→", change_percent
+
+def calculate_volume_ratio(current_volume, historical_volumes):
+    """計算量比（當日成交量/近5日平均成交量）"""
+    if not historical_volumes or len(historical_volumes) == 0:
+        return 1.0
+    
+    avg_volume = sum(historical_volumes) / len(historical_volumes)
+    if avg_volume == 0:
+        return 1.0
+    
+    return current_volume / avg_volume
+
+def get_volume_ratio_class(volume_ratio):
+    """根據量比獲取CSS類別"""
+    if volume_ratio >= 2.0:
+        return "volume-extreme"  # 異常放量（紅色粗體）
+    elif volume_ratio >= 1.5:
+        return "volume-high"     # 明顯放量（橙色）
+    elif volume_ratio >= 0.8:
+        return "volume-normal"   # 正常（黑色）
+    else:
+        return "volume-low"      # 縮量（灰色）
+
+def fetch_historical_data_for_indicators(stock_code, days=60):
+    """獲取歷史資料用於技術指標計算（上櫃版本）"""
+    
+    # 方法1: 使用Manus API Hub的Yahoo Finance API
+    try:
+        import sys
+        sys.path.append('/opt/.manus/.sandbox-runtime')
+        from data_api import ApiClient
+        
+        client = ApiClient()
+        symbol = f"{stock_code}.TWO"  # 上櫃股票使用.TWO後綴
+        
+        logger.info(f"正在獲取 {stock_code} 歷史資料（方法1: Manus API Hub）...")
+        
+        response = client.call_api('YahooFinance/get_stock_chart', query={
+            'symbol': symbol,
+            'region': 'TW',
+            'interval': '1d',
+            'range': '3mo',
+            'includeAdjustedClose': True
+        })
+        
+        if response and 'chart' in response and 'result' in response['chart']:
+            result = response['chart']['result'][0]
+            timestamps = result['timestamp']
+            indicators = result['indicators']['quote'][0]
+            
+            historical_data = []
+            for i, timestamp in enumerate(timestamps):
+                date = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+                
+                # 檢查資料完整性
+                if (indicators['open'][i] is not None and 
+                    indicators['high'][i] is not None and 
+                    indicators['low'][i] is not None and 
+                    indicators['close'][i] is not None and 
+                    indicators['volume'][i] is not None):
+                    
+                    historical_data.append({
+                        'date': date,
+                        'open': float(indicators['open'][i]),
+                        'high': float(indicators['high'][i]),
+                        'low': float(indicators['low'][i]),
+                        'close': float(indicators['close'][i]),
+                        'volume': int(indicators['volume'][i])
+                    })
+            
+            if len(historical_data) >= 34:
+                logger.info(f"成功獲取 {stock_code} 歷史資料 {len(historical_data)} 天（方法1）")
+                return historical_data[-days:] if days else historical_data
+            else:
+                logger.warning(f"方法1獲取的 {stock_code} 歷史資料不足: {len(historical_data)} 天")
+        
+    except Exception as e:
+        logger.warning(f"方法1獲取 {stock_code} 歷史資料失敗: {e}")
+    
+    # 如果方法1失敗，返回None
+    logger.error(f"無法獲取 {stock_code} 的歷史資料")
+    return None
+
+def get_stock_web_data(stock_code, stock_name=None):
+    """獲取單支股票的完整資料（包含技術指標）"""
+    try:
+        # 獲取即時資料
+        if stock_code not in stocks_data:
+            logger.warning(f"股票 {stock_code} 沒有即時資料")
+            return None
+        
+        current_data = stocks_data[stock_code]
+        
+        # 獲取歷史資料用於技術指標計算
+        historical_data = fetch_historical_data_for_indicators(stock_code)
+        
+        if historical_data and len(historical_data) >= 34:
+            # 將當日資料加入歷史資料
+            today_data = {
+                'date': convert_roc_date_to_ad(data_date) if data_date else current_data['date'],
+                'open': current_data['open'],
+                'high': current_data['high'],
+                'low': current_data['low'],
+                'close': current_data['close'],
+                'volume': current_data['volume']
+            }
+            
+            # 檢查是否已經包含當日資料
+            if not historical_data or historical_data[-1]['date'] != today_data['date']:
+                historical_data.append(today_data)
+            
+            # 計算Pine Script技術指標
+            result = calculate_pine_script_indicators(historical_data)
+            
+            if result:
+                fund_flow_trend = result['fund_trend']
+                bull_bear_line = result['multi_short_line']
+                banker_entry_signal = result['banker_entry_signal']
+                is_crossover = result['is_crossover']
+                is_oversold = result['is_oversold']
+                fund_trend_previous = result['fund_trend_previous']
+                multi_short_line_previous = result['multi_short_line_previous']
+            
+            if fund_flow_trend is not None:
+                # 根據嚴格的Pine Script條件判斷狀態
+                if banker_entry_signal:
+                    signal_status = "🟡 黃柱信號"
+                    score = 100
+                elif is_crossover and not is_oversold:
+                    signal_status = "突破但非超賣"
+                    score = 75
+                elif is_oversold and not is_crossover:
+                    signal_status = "超賣但未突破"
+                    score = 65
+                elif fund_flow_trend > bull_bear_line:
+                    signal_status = "資金流向強勢"
+                    score = 55
+                else:
+                    signal_status = "資金流向弱勢"
+                    score = 30
+                
+                # 計算成交量和趨勢信息
+                current_volume = current_data['volume']
+                volume_formatted = format_volume(current_volume)
+                
+                # 計算成交量趨勢（需要歷史成交量數據）
+                historical_volumes = [d.get('volume', 0) for d in historical_data[-6:-1]] if len(historical_data) > 5 else []
+                previous_volume = historical_volumes[-1] if historical_volumes else current_volume
+                volume_trend, volume_change_percent = calculate_trend_direction(current_volume, previous_volume)
+                
+                # 計算量比
+                volume_ratio = calculate_volume_ratio(current_volume, historical_volumes)
+                volume_ratio_class = get_volume_ratio_class(volume_ratio)
+                
+                # 計算資金流向和多空線趨勢
+                fund_trend_direction, fund_trend_change = calculate_trend_direction(fund_flow_trend, fund_trend_previous)
+                multi_short_line_direction, multi_short_line_change = calculate_trend_direction(bull_bear_line, multi_short_line_previous)
+                
+                return {
+                    'name': stock_name or current_data['name'],
+                    'price': current_data['close'],
+                    'change_percent': current_data['change_percent'],
+                    'volume': current_volume,
+                    'volume_formatted': volume_formatted,
+                    'volume_trend': volume_trend,
+                    'volume_change_percent': volume_change_percent,
+                    'volume_ratio': volume_ratio,
+                    'volume_ratio_class': volume_ratio_class,
+                    'fund_trend': f"{fund_flow_trend:.2f}",
+                    'fund_trend_direction': fund_trend_direction,
+                    'fund_trend_change': fund_trend_change,
+                    'multi_short_line': f"{bull_bear_line:.2f}",
+                    'multi_short_line_direction': multi_short_line_direction,
+                    'multi_short_line_change': multi_short_line_change,
+                    'signal_status': signal_status,
+                    'score': score,
+                    'date': data_date,  # 使用統一的資料日期顯示格式
+                    'is_crossover': is_crossover,
+                    'is_oversold': is_oversold,
+                    'banker_entry_signal': banker_entry_signal
+                }
+        
+        # 如果無法計算技術指標，返回詳細錯誤資訊
+        error_msg = "歷史資料獲取失敗"
+        if historical_data is None:
+            error_msg = "API連接失敗"
+        elif len(historical_data) < 34:
+            error_msg = f"資料不足({len(historical_data)}/34天)"
+        
+        logger.warning(f"股票 {stock_code} 無法計算技術指標: {error_msg}")
+        
+        # 即使無法計算技術指標，也要返回基本的成交量信息
+        current_volume = current_data['volume']
+        volume_formatted = format_volume(current_volume)
+        
+        return {
+            'name': stock_name or current_data['name'],
+            'price': current_data['close'],
+            'change_percent': current_data['change_percent'],
+            'volume': current_volume,
+            'volume_formatted': volume_formatted,
+            'volume_trend': 'flat',
+            'volume_change_percent': 0,
+            'volume_ratio': 1.0,
+            'volume_ratio_class': 'volume-normal',
+            'fund_trend': error_msg,
+            'fund_trend_direction': 'flat',
+            'fund_trend_change': 0,
+            'multi_short_line': error_msg,
+            'multi_short_line_direction': 'flat',
+            'multi_short_line_change': 0,
+            'signal_status': error_msg,
+            'score': 0,
+            'date': data_date,  # 使用統一的資料日期顯示格式
+            'is_crossover': False,
+            'is_oversold': False,
+            'banker_entry_signal': False
+        }
+        
+    except Exception as e:
+        logger.error(f"獲取股票 {stock_code} 資料時發生錯誤: {e}")
+        return None
+
 @app.route('/api/screen', methods=['POST'])
 def screen_stocks():
-    """篩選股票API"""
+    """篩選股票"""
     try:
+        current_time = get_taiwan_time()
+        
+        # 檢查是否有股票資料
         if not stocks_data:
             return jsonify({
                 'success': False,
-                'message': '請先更新上櫃股票資料'
+                'error': '請先更新上櫃股票資料'
             }), 400
         
-        # 獲取請求參數
-        request_data = request.get_json() or {}
-        target_codes = request_data.get('stock_codes', [])
-        
-        # 確定要篩選的股票
-        if target_codes:
-            stocks_to_screen = {code: stocks_data[code] for code in target_codes if code in stocks_data}
-        else:
-            # 限制篩選數量以避免超時
-            stocks_to_screen = dict(list(stocks_data.items())[:800])
-        
-        logger.info(f"開始篩選 {len(stocks_to_screen)} 支上櫃股票...")
-        
-        yellow_candle_stocks = []
+        # 獲取所有股票的完整資料（全部股票分析）
+        all_stocks_data = []
+        total_stocks = len(stocks_data)
         processed_count = 0
         
-        for stock_code, stock_data in stocks_to_screen.items():
-            try:
-                # 計算技術指標
-                indicators = calculate_pine_script_indicators(stock_data)
-                
-                # 檢查是否符合黃柱信號
-                if indicators['yellow_candle_signal']:
-                    stock_result = {
-                        'code': stock_code,
-                        'name': stock_data['name'],
-                        'close': stock_data['close'],
-                        'change': stock_data['change'],
-                        'volume': stock_data['volume'],
-                        'volume_lots': round(stock_data['volume'] / 1000),  # 轉換為張數
-                        'date': stock_data['date'],
-                        'money_flow_index': indicators['money_flow_index'],
-                        'bull_bear_line': indicators['bull_bear_line'],
-                        'investment_score': indicators['investment_score'],
-                        'money_flow_trend': indicators['money_flow_trend'],
-                        'bull_bear_trend': indicators['bull_bear_trend'],
-                        'banker_entry_signal': True,
-                        'market': 'OTC'
-                    }
-                    yellow_candle_stocks.append(stock_result)
-                
-                processed_count += 1
-                
-                # 每處理100支股票記錄一次進度
-                if processed_count % 100 == 0:
-                    logger.info(f"已處理 {processed_count} 支股票，發現 {len(yellow_candle_stocks)} 支黃柱信號股票")
-                
-            except Exception as e:
-                logger.warning(f"處理股票 {stock_code} 時發生錯誤: {str(e)}")
-                continue
+        logger.info(f"開始分析 {total_stocks} 支上櫃股票的Pine Script指標...")
         
-        # 按投資評分排序
-        yellow_candle_stocks.sort(key=lambda x: x['investment_score'], reverse=True)
+        # 分批處理以避免超時（減少批次大小）
+        batch_size = 10  # 從50減少到10支股票每批
+        stock_codes = list(stocks_data.keys())
         
-        taiwan_time = get_taiwan_time()
+        # 限制總處理數量以避免超時
+        max_stocks = min(839, len(stock_codes))  # 最多處理839支上櫃股票
+        stock_codes = stock_codes[:max_stocks]
+        
+        logger.info(f"為確保穩定性，本次處理前 {max_stocks} 支上櫃股票")
+        
+        for i in range(0, len(stock_codes), batch_size):
+            batch_codes = stock_codes[i:i+batch_size]
+            logger.info(f"處理第 {i//batch_size + 1} 批股票 ({len(batch_codes)} 支)...")
+            
+            for stock_code in batch_codes:
+                try:
+                    # 使用簡單的超時機制，不依賴signal
+                    import time
+                    start_time = time.time()
+                    
+                    stock_data = get_stock_web_data(stock_code)
+                    
+                    # 檢查是否超時
+                    if time.time() - start_time > 10:  # 10秒超時
+                        logger.warning(f"股票 {stock_code} 處理超時，跳過")
+                        continue                
+                    if stock_data:
+                        all_stocks_data.append({
+                            'code': stock_code,
+                            **stock_data
+                        })
+                        processed_count += 1
+                        
+                        # 每處理5支股票記錄一次進度
+                        if processed_count % 5 == 0:
+                            logger.info(f"已處理 {processed_count}/{max_stocks} 支股票...")
+                            
+                except Exception as e:
+                    logger.warning(f"處理股票 {stock_code} 時發生錯誤: {e}")
+                    continue
+        
+        # 篩選出黃柱信號的股票
+        yellow_candle_stocks = [stock for stock in all_stocks_data if stock.get('banker_entry_signal', False)]
         
         logger.info(f"篩選完成：共分析 {processed_count} 支上櫃股票，發現 {len(yellow_candle_stocks)} 支黃柱信號股票")
         
+        # 按評分排序
+        all_stocks_data.sort(key=lambda x: x.get('score', 0), reverse=True)
+        yellow_candle_stocks.sort(key=lambda x: x.get('score', 0), reverse=True)
+        
         return jsonify({
             'success': True,
+            'all_stocks': all_stocks_data,
             'yellow_candle_stocks': yellow_candle_stocks,
             'total_analyzed': processed_count,
             'yellow_candle_count': len(yellow_candle_stocks),
-            'query_time': taiwan_time.isoformat(),
+            'query_time': current_time.isoformat(),
             'data_date': data_date,
             'market': 'OTC'
         })
         
     except Exception as e:
-        logger.error(f"篩選股票時發生錯誤: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"篩選上櫃股票時發生錯誤: {e}")
         return jsonify({
             'success': False,
-            'message': f'篩選失敗: {str(e)}'
+            'error': f'篩選失敗: {str(e)}'
         }), 500
 
 if __name__ == '__main__':

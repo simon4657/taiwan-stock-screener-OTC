@@ -550,18 +550,81 @@ def get_volume_ratio_class(volume_ratio):
         return "volume-low"      # 縮量（灰色）
 
 def fetch_historical_data_for_indicators(stock_code, days=60):
-    """獲取歷史資料用於技術指標計算（上櫃版本，包含備用機制）"""
+    """獲取歷史資料用於技術指標計算（上櫃版本，以Yahoo Finance為主）"""
     
-    # 方法1: 使用Manus API Hub的Yahoo Finance API
+    # 方法1: 直接使用Yahoo Finance API（主要方法）
     try:
+        logger.info(f"正在獲取 {stock_code} 歷史資料（方法1: Yahoo Finance API）...")
+        
+        import requests
+        import time
+        
+        # Yahoo Finance API URL
+        symbol = f"{stock_code}.TWO"  # 上櫃股票使用.TWO後綴
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+            'Cache-Control': 'no-cache'
+        }
+        
+        params = {
+            'range': '3mo',
+            'interval': '1d',
+            'includeAdjustedClose': 'true'
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=15, verify=False)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if (data and 'chart' in data and 'result' in data['chart'] and 
+                data['chart']['result'] and len(data['chart']['result']) > 0):
+                
+                result = data['chart']['result'][0]
+                timestamps = result['timestamp']
+                quotes = result['indicators']['quote'][0]
+                
+                ohlc_data = []
+                for i in range(len(timestamps)):
+                    if (quotes['open'][i] is not None and 
+                        quotes['high'][i] is not None and 
+                        quotes['low'][i] is not None and 
+                        quotes['close'][i] is not None):
+                        
+                        ohlc_data.append({
+                            'date': datetime.fromtimestamp(timestamps[i]).strftime('%Y-%m-%d'),
+                            'open': quotes['open'][i],
+                            'high': quotes['high'][i],
+                            'low': quotes['low'][i],
+                            'close': quotes['close'][i],
+                            'volume': quotes['volume'][i] if quotes['volume'][i] else 0
+                        })
+                
+                if len(ohlc_data) >= 34:
+                    logger.info(f"✅ {stock_code}: 成功獲取 {len(ohlc_data)} 天歷史資料（Yahoo Finance）")
+                    return ohlc_data[-days:] if len(ohlc_data) > days else ohlc_data
+                else:
+                    logger.warning(f"⚠️ {stock_code}: Yahoo Finance資料不足，僅 {len(ohlc_data)} 天")
+        
+        logger.warning(f"❌ {stock_code}: Yahoo Finance失敗，HTTP狀態碼: {response.status_code}")
+        
+    except Exception as e:
+        logger.warning(f"❌ {stock_code}: Yahoo Finance異常 - {e}")
+    
+    # 方法2: 備用Manus API Hub（如果Yahoo Finance失敗）
+    try:
+        logger.info(f"正在獲取 {stock_code} 歷史資料（方法2: 備用Manus API Hub）...")
+        
         import sys
         sys.path.append('/opt/.manus/.sandbox-runtime')
         from data_api import ApiClient
         
         client = ApiClient()
         symbol = f"{stock_code}.TWO"  # 上櫃股票使用.TWO後綴
-        
-        logger.info(f"正在獲取 {stock_code} 歷史資料（方法1: Manus API Hub）...")
         
         response = client.call_api('YahooFinance/get_stock_chart', query={
             'symbol': symbol,
@@ -594,77 +657,17 @@ def fetch_historical_data_for_indicators(stock_code, days=60):
                         })
                 
                 if len(ohlc_data) >= 34:  # 確保有足夠資料
-                    logger.info(f"✅ {stock_code}: 成功獲取 {len(ohlc_data)} 天歷史資料（方法1）")
+                    logger.info(f"✅ {stock_code}: 成功獲取 {len(ohlc_data)} 天歷史資料（備用Manus API）")
                     return ohlc_data[-days:] if len(ohlc_data) > days else ohlc_data
                 else:
-                    logger.warning(f"⚠️ {stock_code}: 資料不足，僅 {len(ohlc_data)} 天（需要至少34天）")
+                    logger.warning(f"⚠️ {stock_code}: 備用API資料不足，僅 {len(ohlc_data)} 天")
         
-        logger.warning(f"❌ {stock_code}: 方法1失敗，嘗試備用方法...")
-        
+    except ImportError as e:
+        logger.info(f"💡 {stock_code}: data_api模組不可用，跳過備用方法")
     except Exception as e:
-        logger.warning(f"❌ {stock_code}: 方法1異常 - {e}")
+        logger.warning(f"❌ {stock_code}: 備用API異常 - {e}")
     
-    # 方法2: 直接使用requests訪問Yahoo Finance
-    try:
-        logger.info(f"正在獲取 {stock_code} 歷史資料（方法2: 直接Yahoo API）...")
-        
-        import requests
-        import time
-        
-        # Yahoo Finance API URL
-        symbol = f"{stock_code}.TWO"  # 上櫃股票使用.TWO後綴
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        params = {
-            'range': '3mo',
-            'interval': '1d',
-            'includeAdjustedClose': 'true'
-        }
-        
-        response = requests.get(url, headers=headers, params=params, timeout=10, verify=False)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            if (data and 'chart' in data and 'result' in data['chart'] and 
-                data['chart']['result'] and len(data['chart']['result']) > 0):
-                
-                result = data['chart']['result'][0]
-                timestamps = result['timestamp']
-                quotes = result['indicators']['quote'][0]
-                
-                ohlc_data = []
-                for i in range(len(timestamps)):
-                    if (quotes['open'][i] is not None and 
-                        quotes['high'][i] is not None and 
-                        quotes['low'][i] is not None and 
-                        quotes['close'][i] is not None):
-                        
-                        ohlc_data.append({
-                            'date': datetime.fromtimestamp(timestamps[i]).strftime('%Y-%m-%d'),
-                            'open': quotes['open'][i],
-                            'high': quotes['high'][i],
-                            'low': quotes['low'][i],
-                            'close': quotes['close'][i],
-                            'volume': quotes['volume'][i] if quotes['volume'][i] else 0
-                        })
-                
-                if len(ohlc_data) >= 34:
-                    logger.info(f"✅ {stock_code}: 成功獲取 {len(ohlc_data)} 天歷史資料（方法2）")
-                    return ohlc_data[-days:] if len(ohlc_data) > days else ohlc_data
-                else:
-                    logger.warning(f"⚠️ {stock_code}: 方法2資料不足，僅 {len(ohlc_data)} 天")
-        
-        logger.warning(f"❌ {stock_code}: 方法2失敗，HTTP狀態碼: {response.status_code}")
-        
-    except Exception as e:
-        logger.warning(f"❌ {stock_code}: 方法2異常 - {e}")
-    
-    # 方法3: 如果前兩個方法都失敗，記錄錯誤並返回None
+    # 如果所有方法都失敗，記錄錯誤並返回None
     logger.error(f"❌ {stock_code}: 無法獲取歷史資料，所有方法都失敗")
     logger.info(f"💡 建議：請檢查網路連接或稍後重試")
     

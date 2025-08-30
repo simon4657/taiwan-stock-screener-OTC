@@ -202,138 +202,183 @@
             color: #718096;
         }
 
-        .stock-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
+        /* 表格樣式 */
+        .stock-table-container {
             margin-top: 20px;
-        }
-
-        .stock-card {
             background: white;
             border-radius: 15px;
-            padding: 20px;
+            overflow: hidden;
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
-            border: 1px solid #e2e8f0;
-            transition: all 0.3s ease;
         }
 
-        .stock-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.15);
-        }
-
-        .stock-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #f7fafc;
-        }
-
-        .stock-info h4 {
-            font-size: 1.3rem;
-            color: #2d3748;
-            margin-bottom: 5px;
-        }
-
-        .stock-info .code {
+        .stock-table {
+            width: 100%;
+            border-collapse: collapse;
             font-size: 0.9rem;
-            color: #718096;
-            font-weight: 500;
         }
 
-        .stock-price {
-            text-align: right;
+        .stock-table thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
         }
 
-        .stock-price .price {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #2d3748;
-        }
-
-        .stock-price .change {
-            font-size: 0.9rem;
+        .stock-table th {
+            padding: 15px 10px;
+            text-align: center;
             font-weight: 600;
-            margin-top: 2px;
+            font-size: 0.85rem;
+            white-space: nowrap;
         }
 
+        .stock-table td {
+            padding: 12px 10px;
+            text-align: center;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: middle;
+        }
+
+        .stock-table tbody tr:hover {
+            background-color: #f7fafc;
+        }
+
+        .stock-table tbody tr:nth-child(even) {
+            background-color: #fafafa;
+        }
+
+        .stock-table tbody tr:nth-child(even):hover {
+            background-color: #f0f4f8;
+        }
+
+        /* 漲跌幅顏色 */
         .change-positive {
             color: #e53e3e;
+            font-weight: 600;
         }
 
         .change-negative {
             color: #38a169;
+            font-weight: 600;
         }
 
         .change-neutral {
             color: #718096;
+            font-weight: 600;
         }
 
-        .stock-indicators {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-bottom: 15px;
+        /* 量比顏色 */
+        .volume-extreme {
+            color: #c53030;
+            font-weight: 700;
         }
 
-        .indicator {
-            background: #f7fafc;
-            padding: 12px;
-            border-radius: 8px;
+        .volume-high {
+            color: #e53e3e;
+            font-weight: 600;
+        }
+
+        .volume-normal {
+            color: #718096;
+        }
+
+        .volume-low {
+            color: #a0aec0;
+        }
+
+        /* 信號狀態 */
+        .signal-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .signal-yellow {
+            background: #ffd700;
+            color: #744210;
+        }
+
+        .signal-normal {
+            background: #e2e8f0;
+            color: #718096;
+        }
+
+        /* 評分顏色 */
+        .score-high {
+            color: #e53e3e;
+            font-weight: 700;
+        }
+
+        .score-medium {
+            color: #d69e2e;
+            font-weight: 600;
+        }
+
+        .score-low {
+            color: #718096;
+            font-weight: 500;
+        }
+
+        /* 趨勢箭頭 */
+        .trend-arrow {
+            font-size: 0.8rem;
+            margin-left: 4px;
+        }
+
+        .volume-trend {
+            font-size: 0.8rem;
+            color: #718096;
+        }
+
+        /* 響應式設計 */
+        @media (max-width: 768px) {
+            .stock-table-container {
+                overflow-x: auto;
+            }
+            
+            .stock-table {
+                min-width: 800px;
+            }
+            
+            .stock-table th,
+            .stock-table td {
+                padding: 8px 6px;
+                font-size: 0.8rem;
+            }
+        }
+
+        /* 按鈕樣式 */
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
             text-align: center;
         }
 
-        .indicator .label {
-            font-size: 0.8rem;
-            color: #718096;
-            margin-bottom: 5px;
-        }
-
-        .indicator .value {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #2d3748;
-        }
-
-        .indicator .trend {
-            font-size: 1.2rem;
-            margin-left: 5px;
-        }
-
-        .stock-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 15px;
-            border-top: 1px solid #e2e8f0;
-        }
-
-        .volume-info {
-            font-size: 0.9rem;
-            color: #718096;
-        }
-
-        .score-badge {
+        .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 0.9rem;
         }
 
-        .yellow-signal {
-            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
-            color: #744210;
-            padding: 5px 12px;
-            border-radius: 15px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin-top: 10px;
-            text-align: center;
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(240, 147, 251, 0.3);
         }
 
         .no-results {
@@ -652,19 +697,29 @@
         function displayResults(stocks, queryTime, dataDate) {
             document.getElementById('loading').style.display = 'none';
 
+            // 調試：在控制台顯示原始數據
+            console.log('📊 收到的原始股票數據:', stocks);
+            console.log('📅 查詢時間:', queryTime);
+            console.log('📅 數據日期:', dataDate);
+
             if (stocks && stocks.length > 0) {
                 // 顯示結果統計
                 document.getElementById('totalAnalyzed').textContent = '800+';
                 document.getElementById('yellowCandleCount').textContent = stocks.length;
 
-                // 生成股票卡片
-                const stockGrid = document.getElementById('stockGrid');
-                stockGrid.innerHTML = '';
+                // 調試：顯示第一支股票的詳細數據
+                if (stocks[0]) {
+                    console.log('🔍 第一支股票詳細數據:', stocks[0]);
+                    console.log('💰 股價:', stocks[0].price, '類型:', typeof stocks[0].price);
+                    console.log('📈 漲跌幅:', stocks[0].change_percent, '類型:', typeof stocks[0].change_percent);
+                    console.log('📊 成交量:', stocks[0].volume, '類型:', typeof stocks[0].volume);
+                    console.log('💹 資金流向:', stocks[0].fund_trend, '類型:', typeof stocks[0].fund_trend);
+                    console.log('📉 多空線:', stocks[0].multi_short_line, '類型:', typeof stocks[0].multi_short_line);
+                }
 
-                stocks.forEach(stock => {
-                    const stockCard = createStockCard(stock);
-                    stockGrid.appendChild(stockCard);
-                });
+                // 生成條列式表格
+                const stockGrid = document.getElementById('stockGrid');
+                stockGrid.innerHTML = createStockTable(stocks);
 
                 document.getElementById('results').style.display = 'block';
                 document.getElementById('noResults').style.display = 'none';
@@ -681,72 +736,136 @@
             }
         }
 
-        // 創建股票卡片
-        function createStockCard(stock) {
-            const card = document.createElement('div');
-            card.className = 'stock-card';
+        // 創建條列式股票表格
+        function createStockTable(stocks) {
+            let tableHTML = `
+                <div class="stock-table-container">
+                    <table class="stock-table">
+                        <thead>
+                            <tr>
+                                <th>股票代碼</th>
+                                <th>股票名稱</th>
+                                <th>股價</th>
+                                <th>漲跌幅</th>
+                                <th>成交張數</th>
+                                <th>量比</th>
+                                <th>資金流向</th>
+                                <th>多空線</th>
+                                <th>訊號狀態</th>
+                                <th>評分</th>
+                                <th>資料日期</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
 
-            // 處理漲跌幅顯示
-            const change = stock.change || '0.00';
-            let changeClass = 'change-neutral';
-            if (change.includes('+')) {
-                changeClass = 'change-positive';
-            } else if (change.includes('-')) {
-                changeClass = 'change-negative';
-            }
+            stocks.forEach(stock => {
+                // 檢查必要數據是否存在，如果關鍵數據缺失則跳過
+                if (!stock.code || !stock.name || stock.price === undefined || stock.price === null) {
+                    console.warn('跳過數據不完整的股票:', stock);
+                    return;
+                }
 
-            card.innerHTML = `
-                <div class="stock-header">
-                    <div class="stock-info">
-                        <h4>${stock.name || '未知'}</h4>
-                        <div class="code">${stock.code || '未知'}</div>
-                    </div>
-                    <div class="stock-price">
-                        <div class="price">$${stock.close || '0'}</div>
-                        <div class="change ${changeClass}">${change}</div>
-                    </div>
-                </div>
+                // 處理漲跌幅顯示 - 只有真實數據才顯示
+                const changePercent = stock.change_percent;
+                let changeClass = 'change-neutral';
+                let changeDisplay = '無數據';
+                
+                if (changePercent !== undefined && changePercent !== null && !isNaN(changePercent)) {
+                    if (changePercent > 0) {
+                        changeClass = 'change-positive';
+                        changeDisplay = `+${changePercent.toFixed(2)}%`;
+                    } else if (changePercent < 0) {
+                        changeClass = 'change-negative';
+                        changeDisplay = `${changePercent.toFixed(2)}%`;
+                    } else {
+                        changeDisplay = '0.00%';
+                    }
+                }
 
-                <div class="stock-indicators">
-                    <div class="indicator">
-                        <div class="label">資金流向</div>
-                        <div class="value">
-                            ${stock.money_flow_index || '0'}
-                            <span class="trend">${stock.money_flow_trend || '↘'}</span>
-                        </div>
-                    </div>
-                    <div class="indicator">
-                        <div class="label">多空線</div>
-                        <div class="value">
-                            ${stock.bull_bear_line || '0'}
-                            <span class="trend">${stock.bull_bear_trend || '↘'}</span>
-                        </div>
-                    </div>
-                </div>
+                // 處理成交量顯示 - 只有真實數據才顯示
+                const volume = stock.volume;
+                let volumeDisplay = '無數據';
+                if (volume !== undefined && volume !== null && !isNaN(volume)) {
+                    volumeDisplay = stock.volume_formatted || formatVolume(volume);
+                }
 
-                <div class="yellow-signal">🟡 黃柱信號</div>
+                // 處理量比顯示 - 只有真實數據才顯示
+                const volumeRatio = stock.volume_ratio;
+                const volumeRatioClass = stock.volume_ratio_class || 'volume-normal';
+                let volumeRatioDisplay = '無數據';
+                if (volumeRatio !== undefined && volumeRatio !== null && !isNaN(volumeRatio)) {
+                    const trendArrow = stock.volume_change_percent > 0 ? '↗' : stock.volume_change_percent < 0 ? '↘' : '→';
+                    volumeRatioDisplay = `${volumeRatio.toFixed(2)}倍 <span class="trend-arrow">${trendArrow}</span>`;
+                }
 
-                <div class="stock-footer">
-                    <div class="volume-info">
-                        成交: ${stock.volume_lots || '0'} 張<br>
-                        日期: ${stock.date || '-'}
-                    </div>
-                    <div class="score-badge">
-                        評分: ${stock.investment_score || '0'}
-                    </div>
+                // 處理資金流向和多空線 - 只有真實數據才顯示
+                let fundTrendDisplay = '無數據';
+                if (stock.fund_trend !== undefined && stock.fund_trend !== null && stock.fund_trend !== '') {
+                    fundTrendDisplay = `${stock.fund_trend} <span class="trend-arrow">${stock.fund_trend_direction || '→'}</span>`;
+                }
+
+                let multiShortLineDisplay = '無數據';
+                if (stock.multi_short_line !== undefined && stock.multi_short_line !== null && stock.multi_short_line !== '') {
+                    multiShortLineDisplay = `${stock.multi_short_line} <span class="trend-arrow">${stock.multi_short_line_direction || '→'}</span>`;
+                }
+
+                // 處理評分 - 只有真實數據才顯示
+                let scoreDisplay = '無數據';
+                let scoreClass = 'score-low';
+                if (stock.score !== undefined && stock.score !== null && !isNaN(stock.score)) {
+                    scoreDisplay = stock.score;
+                    scoreClass = getScoreClass(stock.score);
+                }
+
+                tableHTML += `
+                    <tr>
+                        <td><strong>${stock.code}</strong></td>
+                        <td>${stock.name}</td>
+                        <td><strong>$${stock.price.toFixed(2)}</strong></td>
+                        <td><span class="${changeClass}">${changeDisplay}</span></td>
+                        <td>${volumeDisplay} <span class="volume-trend">${stock.volume_trend || ''}</span></td>
+                        <td><span class="${volumeRatioClass}">${volumeRatioDisplay}</span></td>
+                        <td>${fundTrendDisplay}</td>
+                        <td>${multiShortLineDisplay}</td>
+                        <td><span class="signal-badge ${stock.banker_entry_signal ? 'signal-yellow' : 'signal-normal'}">${stock.signal_status || '無信號'}</span></td>
+                        <td><strong class="score-${scoreClass}">${scoreDisplay}</strong></td>
+                        <td>${stock.date || '無日期'}</td>
+                    </tr>
+                `;
+            });
+
+            tableHTML += `
+                        </tbody>
+                    </table>
                 </div>
             `;
 
-            return card;
+            return tableHTML;
+        }
+
+        // 格式化成交量
+        function formatVolume(volume) {
+            if (volume >= 10000) {
+                return Math.round(volume / 10000) + '萬張';
+            } else if (volume >= 1000) {
+                return Math.round(volume / 1000) + '千張';
+            } else {
+                return volume + '張';
+            }
+        }
+
+        // 獲取評分樣式類別
+        function getScoreClass(score) {
+            if (score >= 80) return 'high';
+            if (score >= 60) return 'medium';
+            return 'low';
         }
 
         // 事件監聽器
         document.getElementById('updateBtn').addEventListener('click', updateStockData);
         document.getElementById('screenBtn').addEventListener('click', screenStocks);
 
-        // 頁面載入時初始化
-        document.addEventListener('DOMContentLoaded', initializeApp);
     </script>
 </body>
 </html>
-

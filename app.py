@@ -197,6 +197,21 @@ def is_valid_otc_stock(stock_code, stock_name):
     
     return True
 
+def clean_data_for_json(data):
+    """清理數據以確保JSON序列化成功"""
+    import math
+    
+    if isinstance(data, dict):
+        return {k: clean_data_for_json(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_data_for_json(item) for item in data]
+    elif isinstance(data, float):
+        if math.isnan(data) or math.isinf(data):
+            return 0
+        return data
+    else:
+        return data
+
 def calculate_weighted_simple_average(src_values, length, weight):
     """完全按照Pine Script邏輯實現的加權移動平均"""
     if not src_values or length <= 0:
@@ -654,12 +669,12 @@ def get_stock_web_data(stock_code, stock_name=None):
         if historical_data and len(historical_data) >= 34:
             # 將當日資料加入歷史資料
             today_data = {
-                'date': convert_roc_date_to_ad(data_date) if data_date else current_data['date'],
-                'open': current_data['open'],
-                'high': current_data['high'],
-                'low': current_data['low'],
-                'close': current_data['close'],
-                'volume': current_data['volume']
+                'date': convert_roc_date_to_ad(data_date) if data_date else current_data.get('date', ''),
+                'open': current_data.get('open', 0),
+                'high': current_data.get('high', 0),
+                'low': current_data.get('low', 0),
+                'close': current_data.get('close', 0),
+                'volume': current_data.get('volume', 0)
             }
             
             # 檢查是否已經包含當日資料
@@ -697,7 +712,7 @@ def get_stock_web_data(stock_code, stock_name=None):
                     score = 30
                 
                 # 計算成交量和趨勢信息
-                current_volume = current_data['volume']
+                current_volume = current_data.get('volume', 0)
                 volume_formatted = format_volume(current_volume)
                 
                 # 計算成交量趨勢（需要歷史成交量數據）
@@ -714,9 +729,9 @@ def get_stock_web_data(stock_code, stock_name=None):
                 multi_short_line_direction, multi_short_line_change = calculate_trend_direction(bull_bear_line, multi_short_line_previous)
                 
                 return {
-                    'name': stock_name or current_data['name'],
-                    'price': current_data['close'],
-                    'change_percent': current_data['change_percent'],
+                    'name': stock_name or current_data.get('name', ''),
+                    'price': current_data.get('close', 0),
+                    'change_percent': current_data.get('change_percent', 0),
                     'volume': current_volume,
                     'volume_formatted': volume_formatted,
                     'volume_trend': volume_trend,
@@ -747,13 +762,13 @@ def get_stock_web_data(stock_code, stock_name=None):
         logger.warning(f"股票 {stock_code} 無法計算技術指標: {error_msg}")
         
         # 即使無法計算技術指標，也要返回基本的成交量信息
-        current_volume = current_data['volume']
+        current_volume = current_data.get('volume', 0)
         volume_formatted = format_volume(current_volume)
         
         return {
-            'name': stock_name or current_data['name'],
-            'price': current_data['close'],
-            'change_percent': current_data['change_percent'],
+            'name': stock_name or current_data.get('name', ''),
+            'price': current_data.get('close', 0),
+            'change_percent': current_data.get('change_percent', 0),
             'volume': current_volume,
             'volume_formatted': volume_formatted,
             'volume_trend': 'flat',
@@ -848,19 +863,24 @@ def screen_stocks():
         all_stocks_data.sort(key=lambda x: x.get('score', 0), reverse=True)
         yellow_candle_stocks.sort(key=lambda x: x.get('score', 0), reverse=True)
         
-        return jsonify({
+        # 清理數據以確保JSON序列化成功
+        response_data = {
             'success': True,
-            'all_stocks': all_stocks_data,
-            'yellow_candle_stocks': yellow_candle_stocks,
+            'all_stocks': clean_data_for_json(all_stocks_data),
+            'yellow_candle_stocks': clean_data_for_json(yellow_candle_stocks),
             'total_analyzed': processed_count,
             'yellow_candle_count': len(yellow_candle_stocks),
             'query_time': current_time.isoformat(),
             'data_date': data_date,
             'market': 'OTC'
-        })
+        }
+        
+        return jsonify(response_data)
         
     except Exception as e:
+        import traceback
         logger.error(f"篩選上櫃股票時發生錯誤: {e}")
+        logger.error(f"錯誤詳情: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'error': f'篩選失敗: {str(e)}'

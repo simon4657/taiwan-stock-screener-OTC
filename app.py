@@ -883,7 +883,7 @@ def screen_stocks():
         logger.error(f"錯誤詳情: {traceback.format_exc()}")
         return jsonify({
             'success': False,
-            'error': f'篩選失敗: {str(e)}'
+            'message': f'篩選失敗: {str(e)}'
         }), 500
 
 if __name__ == '__main__':

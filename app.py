@@ -17,6 +17,7 @@ import traceback
 from typing import Dict, List, Optional, Tuple, Any
 import time
 import urllib3
+import threading
 
 # 抑制SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -26,11 +27,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+DEPLOY_VERSION = "otc-realtime-breakout-2026-06-18"
 
 # 全域變數
 stocks_data = {}
 last_update_time = None
 data_date = None
+issued_shares_cache = None
+issued_shares_cache_time = None
+realtime_jobs = {}
+realtime_jobs_lock = threading.Lock()
 
 # 台灣時區
 TW_TZ = pytz.timezone('Asia/Taipei')
@@ -211,6 +217,18 @@ def clean_data_for_json(data):
         return data
     else:
         return data
+
+def parse_market_number(value):
+    """解析市場資料中的數字欄位。"""
+    if value is None:
+        return 0
+    text = str(value).strip().replace(',', '').replace(' ', '')
+    if text in ('', '-', '--', 'N/A', 'nan'):
+        return 0
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return 0
 
 def calculate_weighted_simple_average(src_values, length, weight):
     """完全按照Pine Script邏輯實現的加權移動平均"""
@@ -450,6 +468,11 @@ def index():
     """首頁"""
     return render_template('index.html')
 
+@app.route('/realtime')
+def realtime_screener_page():
+    """上櫃強勢量價突破策略頁"""
+    return render_template('realtime_screener.html')
+
 @app.route('/api/health')
 def health_check():
     """健康檢查API"""
@@ -463,7 +486,8 @@ def health_check():
             'data_date': data_date,
             'last_update': last_update_time.isoformat() if last_update_time else None,
             'market': 'OTC',  # 標記為上櫃市場
-            'version': '4.0 - OTC Market Edition'
+            'version': '4.1 - OTC Market Edition',
+            'deploy_version': DEPLOY_VERSION
         })
     except Exception as e:
         logger.error(f"健康檢查失敗: {str(e)}")
@@ -515,6 +539,264 @@ def get_stocks():
     except Exception as e:
         logger.error(f"獲取股票清單失敗: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+def get_otc_stock_codes():
+    """取得上櫃股票代碼清單。"""
+    if stocks_data:
+        return {code: item.get('name', code) for code, item in stocks_data.items()}
+
+    raw_data = fetch_otc_stock_data()
+    processed_data, _ = process_otc_stock_data(raw_data)
+    return {code: item.get('name', code) for code, item in processed_data.items()}
+
+def get_issued_shares_map(force_refresh=False):
+    """取得上櫃公司已發行股數，用於計算 TURN 週轉率。"""
+    global issued_shares_cache, issued_shares_cache_time
+
+    now = get_taiwan_time()
+    if (
+        not force_refresh and
+        issued_shares_cache and
+        issued_shares_cache_time and
+        (now - issued_shares_cache_time).total_seconds() < 24 * 3600
+    ):
+        return issued_shares_cache
+
+    url = 'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O'
+    try:
+        response = requests.get(url, timeout=20, verify=False)
+        if response.status_code != 200:
+            logger.warning(f"取得上櫃公司股數失敗，HTTP {response.status_code}")
+            return issued_shares_cache or {}
+
+        raw_json = response.json()
+        shares_map = {}
+        for item in raw_json if isinstance(raw_json, list) else []:
+            code = str(item.get('SecuritiesCompanyCode', '')).strip()
+            shares = parse_market_number(item.get('IssueShares'))
+            if code and shares > 0:
+                shares_map[code] = int(shares)
+
+        if shares_map:
+            issued_shares_cache = shares_map
+            issued_shares_cache_time = now
+            logger.info(f"取得 {len(shares_map)} 筆上櫃公司已發行股數")
+        return issued_shares_cache or {}
+    except Exception as e:
+        logger.warning(f"取得上櫃公司股數異常: {e}")
+        return issued_shares_cache or {}
+
+def simple_moving_average(values, length):
+    if len(values) < length:
+        return None
+    return sum(values[-length:]) / length
+
+def evaluate_realtime_rule(stock_code, stock_name, issued_shares):
+    """依強勢量價突破條件篩選：TURN>10、量比>5、C>MA5/10/20、漲幅>3。"""
+    historical_data = fetch_historical_data_for_indicators(stock_code, days=60)
+    if not historical_data or len(historical_data) < 21:
+        return None
+
+    latest = historical_data[-1]
+    previous = historical_data[-2] if len(historical_data) >= 2 else None
+    closes = [item['close'] for item in historical_data if item.get('close') is not None]
+    previous_volumes = [item.get('volume', 0) for item in historical_data[-6:-1]]
+
+    current_price = latest['close']
+    current_volume = latest.get('volume', 0)
+    ma5 = simple_moving_average(closes, 5)
+    ma10 = simple_moving_average(closes, 10)
+    ma20 = simple_moving_average(closes, 20)
+    previous_close = previous['close'] if previous else current_price
+    change_percent = ((current_price / previous_close) - 1) * 100 if previous_close else 0
+    volume_ratio = calculate_volume_ratio(current_volume, previous_volumes)
+    turnover_rate = (current_volume / issued_shares * 100) if issued_shares else None
+
+    cond_turnover = turnover_rate is not None and turnover_rate > 10
+    cond_volume_ratio = volume_ratio > 5
+    cond_ma = (
+        ma5 is not None and ma10 is not None and ma20 is not None and
+        current_price > ma5 and current_price > ma10 and current_price > ma20
+    )
+    cond_change = change_percent > 3
+    matched = cond_turnover and cond_volume_ratio and cond_ma and cond_change
+
+    return {
+        'code': stock_code,
+        'name': stock_name,
+        'price': round(current_price, 2),
+        'change_percent': round(change_percent, 2),
+        'turnover_rate': round(turnover_rate, 2) if turnover_rate is not None else None,
+        'volume_ratio': round(volume_ratio, 2),
+        'ma5': round(ma5, 2) if ma5 is not None else None,
+        'ma10': round(ma10, 2) if ma10 is not None else None,
+        'ma20': round(ma20, 2) if ma20 is not None else None,
+        'volume': current_volume,
+        'volume_formatted': format_volume(current_volume),
+        'issued_shares': issued_shares,
+        'matched': matched,
+        'conditions': {
+            'turnover_gt_10': cond_turnover,
+            'volume_ratio_gt_5': cond_volume_ratio,
+            'above_ma5_ma10_ma20': cond_ma,
+            'change_gt_3': cond_change,
+        },
+        'date': latest.get('date'),
+    }
+
+@app.route('/api/realtime_screen', methods=['POST'])
+def realtime_screen():
+    """建立即時強勢量價突破篩選任務；加 ?sync=1 可同步執行。"""
+    try:
+        payload = request.get_json(silent=True) or {}
+        if request.args.get('sync') == '1':
+            return jsonify(run_realtime_screen_job(payload))
+
+        job_id = f"otc-rt-{int(time.time() * 1000)}"
+        with realtime_jobs_lock:
+            realtime_jobs[job_id] = {
+                'job_id': job_id,
+                'success': True,
+                'is_running': True,
+                'progress': 0,
+                'total': 0,
+                'percent': 0,
+                'message': '正在初始化上櫃強勢量價突破篩選...',
+                'started_at': get_taiwan_time().isoformat(),
+                'finished_at': None,
+                'result': None,
+                'error': None,
+            }
+
+        thread = threading.Thread(target=run_realtime_screen_job_background, args=(job_id, payload), daemon=True)
+        thread.start()
+        return jsonify({'success': True, 'async': True, 'job_id': job_id})
+    except Exception as e:
+        logger.error(f"上櫃強勢量價突破篩選失敗: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/realtime_status/<job_id>')
+def realtime_screen_status(job_id):
+    """查詢上櫃強勢量價突破篩選進度。"""
+    with realtime_jobs_lock:
+        job = realtime_jobs.get(job_id)
+        if not job:
+            return jsonify({'success': False, 'error': 'job_not_found'}), 404
+        return jsonify(job)
+
+def update_realtime_job(job_id, **updates):
+    with realtime_jobs_lock:
+        if job_id in realtime_jobs:
+            realtime_jobs[job_id].update(updates)
+
+def run_realtime_screen_job_background(job_id, payload):
+    try:
+        result = run_realtime_screen_job(payload, job_id=job_id)
+        update_realtime_job(
+            job_id,
+            is_running=False,
+            progress=result.get('total_requested', 0),
+            total=result.get('total_requested', 0),
+            percent=100,
+            message='篩選完成',
+            finished_at=get_taiwan_time().isoformat(),
+            result=result,
+        )
+    except Exception as e:
+        logger.error(f"上櫃強勢量價突破篩選任務失敗: {e}")
+        update_realtime_job(
+            job_id,
+            is_running=False,
+            success=False,
+            message=f'篩選失敗: {e}',
+            finished_at=get_taiwan_time().isoformat(),
+            error=str(e),
+        )
+
+def run_realtime_screen_job(payload, job_id=None):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    requested_codes = payload.get('stock_codes') or []
+    limit = payload.get('limit')
+    stock_list = get_otc_stock_codes()
+    issued_shares = get_issued_shares_map()
+
+    if requested_codes:
+        stock_codes = [str(code).strip() for code in requested_codes if str(code).strip() in stock_list]
+    else:
+        stock_codes = list(stock_list.keys())
+
+    if isinstance(limit, int) and limit > 0:
+        stock_codes = stock_codes[:limit]
+
+    started_at = get_taiwan_time()
+    results = []
+    matched = []
+    errors = []
+    skipped_missing_shares = 0
+    completed = 0
+    total = len(stock_codes)
+
+    if job_id:
+        update_realtime_job(job_id, total=total, message=f'正在分析 0/{total} 支上櫃股票...')
+
+    def analyze_one(code):
+        shares = issued_shares.get(code)
+        if not shares:
+            return {'code': code, 'missing_shares': True}
+        return evaluate_realtime_rule(code, stock_list.get(code, code), shares)
+
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(analyze_one, code): code for code in stock_codes}
+        for future in as_completed(futures):
+            code = futures[future]
+            completed += 1
+            try:
+                result = future.result()
+                if not result:
+                    errors.append({'code': code, 'reason': 'no_realtime_or_history_data'})
+                elif result.get('missing_shares'):
+                    skipped_missing_shares += 1
+                else:
+                    results.append(result)
+                    if result.get('matched'):
+                        matched.append(result)
+            except Exception as e:
+                errors.append({'code': code, 'reason': str(e)})
+
+            if job_id:
+                percent = round((completed / total * 100), 1) if total else 100
+                update_realtime_job(
+                    job_id,
+                    progress=completed,
+                    total=total,
+                    percent=percent,
+                    message=f'正在分析 {completed}/{total} 支上櫃股票...',
+                )
+
+    matched.sort(key=lambda item: (item['turnover_rate'] or 0, item['volume_ratio'], item['change_percent']), reverse=True)
+    results.sort(key=lambda item: (item['matched'], item['turnover_rate'] or 0, item['volume_ratio']), reverse=True)
+
+    return {
+        'success': True,
+        'rules': {
+            'turnover_rate_gt': 10,
+            'volume_ratio_gt': 5,
+            'above_ma': [5, 10, 20],
+            'change_percent_gt': 3,
+        },
+        'matched_stocks': clean_data_for_json(matched),
+        'all_results': clean_data_for_json(results),
+        'total_requested': total,
+        'total_analyzed': len(results),
+        'matched_count': len(matched),
+        'skipped_missing_shares': skipped_missing_shares,
+        'error_count': len(errors),
+        'errors': errors[:30],
+        'query_time': started_at.isoformat(),
+        'elapsed_seconds': round((get_taiwan_time() - started_at).total_seconds(), 2),
+        'market': 'OTC',
+    }
 
 def format_volume(volume):
     """格式化成交張數顯示（1張=1000股）"""
@@ -893,4 +1175,3 @@ if __name__ == '__main__':
     
     # 啟動Flask應用
     app.run(host='0.0.0.0', port=5000, debug=False)
-
